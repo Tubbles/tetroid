@@ -1,0 +1,10 @@
+name: tetroid
+version: "1.0"
+author: Tubbles
+about: Does awesome things
+args:
+    - max-fps:
+        long: max-fps
+        value_name: fps
+        help: Sets a maximum cap for the number of frames per second
+        takes_value: true
