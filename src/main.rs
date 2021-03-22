@@ -1,11 +1,16 @@
 extern crate sdl2;
 
+// TODO :
+// Investigate why FPS counter always seem to be 1-2 frames too low??
+// Cache the glyphs from ttf for more fine grained control over color and formatting per glyph
+
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::mouse::MouseButton;
 use sdl2::pixels::Color;
 use sdl2::rect::{Point, Rect};
 use sdl2::render::{Canvas, Texture, TextureCreator};
+use sdl2::ttf::{Font, FontStyle};
 use sdl2::video::{Window, WindowContext};
 use std::collections::HashMap;
 use std::path::Path;
@@ -23,14 +28,27 @@ pub const PIXEL_SIZE: u32 = 4;
 pub const WIDTH: u32 = 2560 / PIXEL_SIZE;
 pub const HEIGHT: u32 = 1440 / PIXEL_SIZE;
 
-#[derive(Copy, Clone)]
 pub struct RenderData<'a> {
     pub x: usize,
     pub y: usize,
     pub z: isize,
     pub w: usize,
     pub h: usize,
-    pub tex: &'a sdl2::render::Texture<'a>,
+    pub borrowed_tex: Option<&'a sdl2::render::Texture<'a>>,
+    pub owned_tex: Option<sdl2::render::Texture<'a>>,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct TextBlock {
+    pub text: String,
+    pub x: usize,
+    pub y: usize,
+    pub z: isize,
+    pub w: usize,
+    pub h: usize,
+    pub color: Color,
+    pub fontname: String,
+    pub fontsize: f64,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -42,7 +60,7 @@ pub enum State {
 pub struct World {
     pub playground: [bool; (WIDTH * HEIGHT) as usize],
     pub state: State,
-    pub text: String,
+    pub text: TextBlock,
 }
 
 impl World {
@@ -50,7 +68,17 @@ impl World {
         World {
             playground: [false; (WIDTH * HEIGHT) as usize],
             state: State::Paused,
-            text: "Hello, rust!".to_owned(),
+            text: TextBlock {
+                text: format!("UPS: {:.2}\nFPS: {:.2}", 0.0, 0.0),
+                x: 0,
+                y: 0,
+                z: 0,
+                w: 100,
+                h: 100,
+                color: Color::RGB(255, 255, 255),
+                fontname: String::from("Standard"),
+                fontsize: 14.0,
+            },
         }
     }
 
@@ -160,11 +188,48 @@ pub fn prepare_pixels<'a>(
                 w: PIXEL_SIZE as usize,
                 h: PIXEL_SIZE as usize,
                 z: 0,
-                tex: &pxtx["Blue"],
+                borrowed_tex: Some(&pxtx["Blue"]),
+                owned_tex: None,
             };
             rendq.push(data);
         }
     }
+}
+
+pub fn prepare_text<'a>(
+    tex_creator: &'a TextureCreator<WindowContext>,
+    text: &TextBlock,
+    ttf_atlas: &HashMap<String, Font>,
+    rendq: &mut Vec<RenderData<'a>>,
+) -> Result<(), String> {
+    // render a surface, and convert it to a texture bound to the canvas
+    let font = &ttf_atlas[text.fontname.as_str()];
+    let surface = font
+        .render(text.text.as_str())
+        .solid(text.color)
+        .map_err(|e| e.to_string())?;
+    let texture = tex_creator
+        .create_texture_from_surface(&surface)
+        .map_err(|e| e.to_string())?;
+
+    let font_size = font.size_of(text.text.as_str()).unwrap();
+
+    let data = RenderData {
+        x: text.x,
+        y: text.y,
+        w: font_size.0 as usize,
+        h: font_size.1 as usize,
+        z: text.z,
+        borrowed_tex: None,
+        owned_tex: Some(texture),
+    };
+
+    rendq.push(data);
+
+    // acc += font_size.1 as usize;
+    // }
+
+    Ok(())
 }
 
 pub fn draw(canvas: &mut Canvas<sdl2::video::Window>, data: Vec<RenderData>) -> Result<(), String> {
@@ -172,33 +237,20 @@ pub fn draw(canvas: &mut Canvas<sdl2::video::Window>, data: Vec<RenderData>) -> 
     canvas.clear();
 
     for rend in data {
-        canvas.copy(
-            &rend.tex,
-            None,
-            Rect::new(rend.x as i32, rend.y as i32, rend.w as u32, rend.h as u32),
-        )?;
+        if rend.borrowed_tex.is_some() {
+            canvas.copy(
+                rend.borrowed_tex.unwrap(),
+                None,
+                Rect::new(rend.x as i32, rend.y as i32, rend.w as u32, rend.h as u32),
+            )?;
+        } else {
+            canvas.copy(
+                &rend.owned_tex.unwrap(),
+                None,
+                Rect::new(rend.x as i32, rend.y as i32, rend.w as u32, rend.h as u32),
+            )?;
+        };
     }
-
-    // render a surface, and convert it to a texture bound to the canvas
-    // let surface = ttf_atlas["Standard"]
-    //     .render("Hello Rust!")
-    //     .blended(Color::RGB(100, 160, 230))
-    //     .map_err(|e| e.to_string())?;
-    // let texture = canvas
-    //     .texture_creator()
-    //     .create_texture_from_surface(&surface)
-    //     .map_err(|e| e.to_string())?;
-
-    // canvas.copy(
-    //     &texture,
-    //     None,
-    //     Rect::new(
-    //         (100 * PIXEL_SIZE) as i32,
-    //         (100 * PIXEL_SIZE) as i32,
-    //         100 * PIXEL_SIZE,
-    //         100 * PIXEL_SIZE,
-    //     ),
-    // )?;
 
     canvas.present();
 
@@ -254,13 +306,16 @@ pub fn main() -> Result<(), String> {
     let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string())?;
 
     // Load the fonts
-    let mut ttf_atlas: HashMap<&str, sdl2::ttf::Font> = HashMap::new();
+    let mut ttf_atlas: HashMap<String, Font> = HashMap::new();
     for ttf in STD_TTF {
-        ttf_atlas.insert(ttf.0, ttf_context.load_font(Path::new(ttf.1), 14)?);
+        ttf_atlas.insert(
+            String::from(ttf.0),
+            ttf_context.load_font(Path::new(ttf.1), 44)?,
+        );
         ttf_atlas
-            .get_mut(ttf.0)
+            .get_mut(&String::from(ttf.0))
             .unwrap()
-            .set_style(sdl2::ttf::FontStyle::NORMAL);
+            .set_style(FontStyle::NORMAL);
     }
 
     let texture_creator: TextureCreator<_> = canvas.texture_creator();
@@ -277,6 +332,7 @@ pub fn main() -> Result<(), String> {
 
     let mut rendq: Vec<RenderData> = Vec::new();
     prepare_pixels(&world, &pxtx, &mut rendq);
+    prepare_text(&texture_creator, &world.text, &ttf_atlas, &mut rendq)?;
     draw(&mut canvas, rendq)?; // Initial draw of the canvas
 
     let mut event_pump = sdl_context.event_pump()?;
@@ -289,7 +345,7 @@ pub fn main() -> Result<(), String> {
     let mut gfx_tic = Instant::now();
     let mut phy_tic = Instant::now();
     let mut ups = 0.0f64;
-    let mut current_mouse: (i32, i32) = (0, 0);
+    // let mut current_mouse: (i32, i32) = (0, 0);
 
     'running: loop {
         let delta = tic.elapsed().as_secs_f64();
@@ -298,6 +354,7 @@ pub fn main() -> Result<(), String> {
 
             let mut rendq: Vec<RenderData> = Vec::new();
             prepare_pixels(&world, &pxtx, &mut rendq);
+            prepare_text(&texture_creator, &world.text, &ttf_atlas, &mut rendq)?;
             draw(&mut canvas, rendq)?; // Initial draw of the canvas
 
             // update FPS counter
@@ -305,16 +362,17 @@ pub fn main() -> Result<(), String> {
             if gfx_delta > 1.0 / 2.0 {
                 gfx_tic += Duration::from_secs_f64(gfx_delta);
                 let fps = (frame_no as f64) / gfx_delta;
-                print!("\x1B[2J"); // clear terminal
-                println!("ups: {}", ups);
-                println!("fps: {}", fps);
-                println!(
-                    "mouse: {:?}",
-                    (
-                        current_mouse.0 / PIXEL_SIZE as i32,
-                        current_mouse.1 / PIXEL_SIZE as i32
-                    )
-                );
+                world.text.text = format!("UPS: {:.2}\nFPS: {:.2}", ups, fps);
+                // print!("\x1B[2J"); // clear terminal
+                // println!("ups: {}", ups);
+                // println!("fps: {}", fps);
+                // println!(
+                //     "mouse: {:?}",
+                //     (
+                //         current_mouse.0 / PIXEL_SIZE as i32,
+                //         current_mouse.1 / PIXEL_SIZE as i32
+                //     )
+                // );
                 frame_no = 0;
             } else {
                 frame_no += 1;
@@ -370,7 +428,7 @@ pub fn main() -> Result<(), String> {
                         if mousebtn_down {
                             movev.push((x, y));
                         }
-                        current_mouse = (x, y);
+                        // current_mouse = (x, y);
                     }
 
                     Event::MouseButtonUp {
