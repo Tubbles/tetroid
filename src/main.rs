@@ -23,7 +23,8 @@ pub const PIXEL_SIZE: u32 = 4;
 pub const WIDTH: u32 = 2560 / PIXEL_SIZE;
 pub const HEIGHT: u32 = 1440 / PIXEL_SIZE;
 
-struct RenderData<'a> {
+#[derive(Copy, Clone)]
+pub struct RenderData<'a> {
     pub x: usize,
     pub y: usize,
     pub z: isize,
@@ -146,21 +147,22 @@ fn cache_pixel_texture<'a>(
 }
 
 pub fn prepare_pixels<'a>(
-    world: &'a World,
-    pxtx: &'a HashMap<&'a str, &'a Texture>,
-    rendq: &'a mut Vec<&'a mut RenderData>,
+    world: &World,
+    pxtx: &'a HashMap<&str, Texture<'a>>,
+    rendq: &mut Vec<RenderData<'a>>,
 ) {
     for (i, unit) in (&world).into_iter().enumerate() {
         let i = i as u32;
         if *unit {
-            let data: RenderData;
-            data.x = ((i % WIDTH) * PIXEL_SIZE) as usize;
-            data.y = ((i / WIDTH) * PIXEL_SIZE) as usize;
-            data.w = PIXEL_SIZE as usize;
-            data.h = PIXEL_SIZE as usize;
-            data.z = 0;
-            data.tex = &pxtx["Blue"];
-            rendq.push(&mut data);
+            let data = RenderData {
+                x: ((i % WIDTH) * PIXEL_SIZE) as usize,
+                y: ((i / WIDTH) * PIXEL_SIZE) as usize,
+                w: PIXEL_SIZE as usize,
+                h: PIXEL_SIZE as usize,
+                z: 0,
+                tex: &pxtx["Blue"],
+            };
+            rendq.push(data);
         }
     }
 }
@@ -169,20 +171,12 @@ pub fn draw(canvas: &mut Canvas<sdl2::video::Window>, data: Vec<RenderData>) -> 
     canvas.set_draw_color(Color::RGB(20, 0, 0));
     canvas.clear();
 
-    for (i, unit) in (&world).into_iter().enumerate() {
-        let i = i as u32;
-        if *unit {
-            canvas.copy(
-                &pxtx["Blue"],
-                None,
-                Rect::new(
-                    ((i % WIDTH) * PIXEL_SIZE) as i32,
-                    ((i / WIDTH) * PIXEL_SIZE) as i32,
-                    PIXEL_SIZE,
-                    PIXEL_SIZE,
-                ),
-            )?;
-        }
+    for rend in data {
+        canvas.copy(
+            &rend.tex,
+            None,
+            Rect::new(rend.x as i32, rend.y as i32, rend.w as u32, rend.h as u32),
+        )?;
     }
 
     // render a surface, and convert it to a texture bound to the canvas
@@ -242,8 +236,8 @@ pub fn main() -> Result<(), String> {
         .window("Tetroid", WIDTH * PIXEL_SIZE, HEIGHT * PIXEL_SIZE)
         .position_centered()
         // .opengl() // ??
-        // .fullscreen_desktop()
-        .fullscreen()
+        .fullscreen_desktop()
+        // .fullscreen()
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -281,7 +275,9 @@ pub fn main() -> Result<(), String> {
     }
     let mut world = World::new();
 
-    draw(&mut canvas, &world, &pxtx)?; // Initial draw of the canvas
+    let mut rendq: Vec<RenderData> = Vec::new();
+    prepare_pixels(&world, &pxtx, &mut rendq);
+    draw(&mut canvas, rendq)?; // Initial draw of the canvas
 
     let mut event_pump = sdl_context.event_pump()?;
 
@@ -300,7 +296,9 @@ pub fn main() -> Result<(), String> {
         if delta > frame_period {
             tic += Duration::from_secs_f64(delta);
 
-            draw(&mut canvas, &world, &pxtx)?;
+            let mut rendq: Vec<RenderData> = Vec::new();
+            prepare_pixels(&world, &pxtx, &mut rendq);
+            draw(&mut canvas, rendq)?; // Initial draw of the canvas
 
             // update FPS counter
             let gfx_delta = gfx_tic.elapsed().as_secs_f64();
