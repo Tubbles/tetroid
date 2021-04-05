@@ -1,20 +1,21 @@
 mod engine;
 use engine::*;
+mod res;
+use res::*;
 
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::mouse::MouseButton;
-use sdl2::ttf::{Font, FontStyle};
-
-use sdl2::render::{Texture, TextureCreator};
 
 #[macro_use]
 extern crate clap;
 
-use std::collections::HashMap;
-use std::path::Path;
 use std::{thread, time};
 use time::{Duration, Instant};
+
+pub const PIXEL_SIZE: u32 = 2;
+pub const WIDTH: u32 = 2560 / PIXEL_SIZE;
+pub const HEIGHT: u32 = 1440 / PIXEL_SIZE;
 
 pub fn main() -> Result<(), String> {
     let yaml = load_yaml!("cli.yml");
@@ -30,7 +31,7 @@ pub fn main() -> Result<(), String> {
     };
 
     if max_fps == std::f64::NEG_INFINITY {
-        return Err("max-fps is not convertible to a float value".to_owned());
+        return Err(String::from("max-fps is not convertible to a float value"));
     }
 
     let frame_period = 1.0f64 / max_fps;
@@ -63,36 +64,13 @@ pub fn main() -> Result<(), String> {
 
     println!("Using SDL_Renderer \"{}\"", canvas.info().name);
 
-    let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string())?;
+    let (ttf_atlas, texture_creator, pixel_altas) = init_res_contexts(&mut canvas, PIXEL_SIZE)?;
 
-    // Load the fonts
-    let mut ttf_atlas: HashMap<String, Font> = HashMap::new();
-    for ttf in STD_TTF {
-        ttf_atlas.insert(
-            String::from(ttf.0),
-            ttf_context.load_font(Path::new(ttf.1), 44)?,
-        );
-        ttf_atlas
-            .get_mut(&String::from(ttf.0))
-            .unwrap()
-            .set_style(FontStyle::NORMAL);
-    }
-
-    let texture_creator: TextureCreator<_> = canvas.texture_creator();
-
-    // cache some standard colors
-    let mut pxtx: HashMap<&str, Texture> = HashMap::new();
-    for col in STD_CLS {
-        pxtx.insert(
-            col.0,
-            cache_pixel_texture(&mut canvas, &texture_creator, col.1)?,
-        );
-    }
-    let mut world = World::new();
+    let mut world = World::new(WIDTH, HEIGHT);
 
     let mut rendq: Vec<RenderData> = Vec::new();
-    prepare_pixels(&world, &pxtx, &mut rendq);
-    prepare_text(&texture_creator, &world.m_text, &ttf_atlas, &mut rendq)?;
+    prepare_pixels(&world, &pixel_altas, &mut rendq, WIDTH, PIXEL_SIZE);
+    prepare_text(&texture_creator, &world.text, &ttf_atlas, &mut rendq)?;
     draw(&mut canvas, rendq)?; // Initial draw of the canvas
 
     let mut event_pump = sdl_context.event_pump()?;
@@ -105,7 +83,6 @@ pub fn main() -> Result<(), String> {
     let mut gfx_tic = Instant::now();
     let mut phy_tic = Instant::now();
     let mut ups = 0.0f64;
-    // let mut current_mouse: (i32, i32) = (0, 0);
 
     'running: loop {
         let delta = tic.elapsed().as_secs_f64();
@@ -113,8 +90,8 @@ pub fn main() -> Result<(), String> {
             tic += Duration::from_secs_f64(delta);
 
             let mut rendq: Vec<RenderData> = Vec::new();
-            prepare_pixels(&world, &pxtx, &mut rendq);
-            prepare_text(&texture_creator, &world.m_text, &ttf_atlas, &mut rendq)?;
+            prepare_pixels(&world, &pixel_altas, &mut rendq, WIDTH, PIXEL_SIZE);
+            prepare_text(&texture_creator, &world.text, &ttf_atlas, &mut rendq)?;
             draw(&mut canvas, rendq)?; // Initial draw of the canvas
 
             // update FPS counter
@@ -122,22 +99,12 @@ pub fn main() -> Result<(), String> {
             if gfx_delta > 1.0 / 2.0 {
                 gfx_tic += Duration::from_secs_f64(gfx_delta);
                 let fps = (frame_no as f64) / gfx_delta;
-                world.m_text.text = format!(
+                world.text.text = format!(
                     "UPS: {:.2}\nFPS: {:.2}\nnum: {}",
                     ups,
                     fps,
                     world.num_alive()
                 );
-                // print!("\x1B[2J"); // clear terminal
-                // println!("ups: {}", ups);
-                // println!("fps: {}", fps);
-                // println!(
-                //     "mouse: {:?}",
-                //     (
-                //         current_mouse.0 / PIXEL_SIZE as i32,
-                //         current_mouse.1 / PIXEL_SIZE as i32
-                //     )
-                // );
                 frame_no = 0;
             } else {
                 frame_no += 1;
@@ -253,7 +220,7 @@ pub fn main() -> Result<(), String> {
                 }
             }
 
-            if world.m_state == State::Playing {
+            if world.state == State::Playing {
                 world.update();
             }
         }

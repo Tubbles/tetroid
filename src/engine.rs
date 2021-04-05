@@ -6,19 +6,12 @@ extern crate sdl2;
 // If rendering becomes too slow/ineffective we might need to interface some gfx lib directly
 
 use sdl2::pixels::Color;
-use sdl2::rect::{Point, Rect};
+use sdl2::rect::Rect;
 use sdl2::render::{Canvas, Texture, TextureCreator};
 use sdl2::ttf::Font;
-use sdl2::video::{Window, WindowContext};
+use sdl2::video::WindowContext;
 
 use std::collections::HashMap;
-
-pub const STD_CLS: &[(&str, Color)] = &[("Blue", Color::RGB(100, 160, 230))];
-pub const STD_TTF: &[(&str, &str)] = &[("Standard", "rsc/disposabledroid-bb.regular.ttf")]; // https://www.1001fonts.com/disposabledroid-bb-font.html
-
-pub const PIXEL_SIZE: u32 = 2;
-pub const WIDTH: u32 = 2560 / PIXEL_SIZE;
-pub const HEIGHT: u32 = 1440 / PIXEL_SIZE;
 
 pub struct RenderData<'a> {
     pub x: usize,
@@ -50,23 +43,27 @@ pub enum State {
 }
 
 pub struct World {
-    pub m_playground: [bool; (WIDTH * HEIGHT) as usize],
-    pub m_state: State,
-    pub m_text: TextBlock,
+    pub width: u32,
+    pub height: u32,
+    pub playground: Vec<bool>,
+    pub state: State,
+    pub text: TextBlock,
 }
 
 impl Default for World {
     fn default() -> Self {
-        World::new()
+        World::new(60, 40)
     }
 }
 
 impl World {
-    pub fn new() -> World {
+    pub fn new(width: u32, height: u32) -> World {
         World {
-            m_playground: [false; (WIDTH * HEIGHT) as usize],
-            m_state: State::Paused,
-            m_text: TextBlock {
+            width,
+            height,
+            playground: vec![false; (width * height) as usize],
+            state: State::Paused,
+            text: TextBlock {
                 text: format!("UPS: {:.2}\nFPS: {:.2}\nnum: {}", 0.0, 0.0, 0),
                 x: 0,
                 y: 0,
@@ -81,34 +78,34 @@ impl World {
     }
 
     pub fn get(&self, x: i32, y: i32) -> Option<bool> {
-        if x >= 0 && y >= 0 && (x as u32) < WIDTH && (y as u32) < HEIGHT {
-            Some(self.m_playground[(x as u32 + (y as u32) * WIDTH) as usize])
+        if x >= 0 && y >= 0 && (x as u32) < self.width && (y as u32) < self.height {
+            Some(self.playground[(x as u32 + (y as u32) * self.width) as usize])
         } else {
             None
         }
     }
 
     pub fn get_mut(&mut self, x: i32, y: i32) -> Option<&mut bool> {
-        if x >= 0 && y >= 0 && (x as u32) < WIDTH && (y as u32) < HEIGHT {
-            Some(&mut self.m_playground[(x as u32 + (y as u32) * WIDTH) as usize])
+        if x >= 0 && y >= 0 && (x as u32) < self.width && (y as u32) < self.height {
+            Some(&mut self.playground[(x as u32 + (y as u32) * self.width) as usize])
         } else {
             None
         }
     }
 
     pub fn toggle_state(&mut self) {
-        self.m_state = match self.m_state {
+        self.state = match self.state {
             State::Paused => State::Playing,
             State::Playing => State::Paused,
         }
     }
 
     pub fn update(&mut self) {
-        let mut new_playground = self.m_playground;
+        let mut new_playground = self.playground.clone();
         for (u, square) in new_playground.iter_mut().enumerate() {
             let u = u as u32;
-            let x = u % WIDTH;
-            let y = u / WIDTH;
+            let x = u % self.width;
+            let y = u / self.width;
             let mut count: u32 = 0;
             for i in -1..2 {
                 for j in -1..2 {
@@ -127,15 +124,15 @@ impl World {
                 *square = true;
             }
         }
-        self.m_playground = new_playground;
+        self.playground = new_playground;
     }
 
     pub fn clear(&mut self) {
-        self.m_playground = [false; (WIDTH * HEIGHT) as usize];
+        self.playground = vec![false; (self.width * self.height) as usize];
     }
 
     pub fn num_alive(&mut self) -> usize {
-        self.m_playground.iter().filter(|&x| *x).count()
+        self.playground.iter().filter(|&x| *x).count()
     }
 }
 
@@ -143,50 +140,25 @@ impl<'a> IntoIterator for &'a World {
     type Item = &'a bool;
     type IntoIter = ::std::slice::Iter<'a, bool>;
     fn into_iter(self) -> ::std::slice::Iter<'a, bool> {
-        self.m_playground.iter()
+        self.playground.iter()
     }
-}
-
-pub fn cache_pixel_texture<'a>(
-    canvas: &mut Canvas<Window>,
-    texture_creator: &'a TextureCreator<WindowContext>,
-    color: Color,
-) -> Result<Texture<'a>, String> {
-    let mut target_texture = texture_creator
-        .create_texture_target(None, PIXEL_SIZE, PIXEL_SIZE)
-        .map_err(|e| e.to_string())?;
-    canvas
-        .with_texture_canvas(&mut target_texture, |texture_canvas| {
-            texture_canvas.set_draw_color(color);
-            for i in 0..PIXEL_SIZE {
-                for j in 0..PIXEL_SIZE {
-                    // drawing pixel by pixel isn't very effective, but we only do it once and store
-                    // the texture afterwards so it's still alright!
-                    // this doesn't mean anything, there was some trial and serror to find
-                    // something that wasn't too ugly
-                    texture_canvas
-                        .draw_point(Point::new(i as i32, j as i32))
-                        .expect("could not draw point");
-                }
-            }
-        })
-        .map_err(|e| e.to_string())?;
-    Ok(target_texture)
 }
 
 pub fn prepare_pixels<'a>(
     world: &World,
-    pxtx: &'a HashMap<&str, Texture<'a>>,
+    pxtx: &'a HashMap<String, Texture<'a>>,
     rendq: &mut Vec<RenderData<'a>>,
+    width: u32,
+    pixel_size: u32,
 ) {
     for (i, unit) in (&world).into_iter().enumerate() {
         let i = i as u32;
         if *unit {
             let data = RenderData {
-                x: ((i % WIDTH) * PIXEL_SIZE) as usize,
-                y: ((i / WIDTH) * PIXEL_SIZE) as usize,
-                w: PIXEL_SIZE as usize,
-                h: PIXEL_SIZE as usize,
+                x: ((i % width) * pixel_size) as usize,
+                y: ((i / width) * pixel_size) as usize,
+                w: pixel_size as usize,
+                h: pixel_size as usize,
                 z: 0,
                 borrowed_tex: Some(&pxtx["Blue"]),
                 owned_tex: None,
