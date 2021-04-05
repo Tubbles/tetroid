@@ -55,6 +55,12 @@ pub struct World {
     pub m_text: TextBlock,
 }
 
+impl Default for World {
+    fn default() -> Self {
+        World::new()
+    }
+}
+
 impl World {
     pub fn new() -> World {
         World {
@@ -115,12 +121,10 @@ impl World {
                     }
                 }
             }
-            if count > 3 || count < 2 {
+            if !(2..4).contains(&count) {
                 *square = false;
             } else if count == 3 {
                 *square = true;
-            } else if count == 2 {
-                *square = *square;
             }
         }
         self.m_playground = new_playground;

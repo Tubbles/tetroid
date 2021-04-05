@@ -211,9 +211,7 @@ pub fn main() -> Result<(), String> {
 
             if mousebtn_down {
                 for m in movev.drain(0..movev.len()) {
-                    if last_m.is_some() {
-                        let last_m = last_m.unwrap();
-
+                    if let Some(last_m) = last_m {
                         // Bresenham's line algorithm
                         let mut x0 = last_m.0;
                         let x1 = m.0;
@@ -226,16 +224,13 @@ pub fn main() -> Result<(), String> {
                         let sy = if y0 < y1 { 1 } else { -1 };
                         let mut err = dx + dy;
                         loop {
-                            match world.get_mut(
+                            if let Some(square) = world.get_mut(
                                 (x0 as u32 / PIXEL_SIZE) as i32,
                                 (y0 as u32 / PIXEL_SIZE) as i32,
                             ) {
-                                Some(square) => {
-                                    if *square == false {
-                                        *square = !(*square);
-                                    }
+                                if !*square {
+                                    *square = !(*square);
                                 }
-                                None => {}
                             };
 
                             if (x0 == x1) && (y0 == y1) {
