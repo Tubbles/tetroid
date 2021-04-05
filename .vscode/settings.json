@@ -1,0 +1,13 @@
+{
+    "workbench.editor.enablePreviewFromQuickOpen": false,
+    "workbench.quickOpen.closeOnFocusLost": false,
+    "workbench.editor.enablePreview": false,
+    "window.zoomLevel": 0,
+    "rust-analyzer.checkOnSave.command": "clippy", // Replaces the default `cargo check` command with `cargo clippy` on Rust file save
+    "[rust]": { // Tells VSCode to defer to rust-analyzer's formatter (rustfmt) for rust code
+        "editor.defaultFormatter": "matklad.rust-analyzer" //
+    }, //
+    "rust-analyzer.cargo.allFeatures": true, // For fun. Runs `cargo check --all-features`. You don't need this one.
+    "rust-analyzer.updates.channel": "nightly",
+    "editor.formatOnSave": true
+}
